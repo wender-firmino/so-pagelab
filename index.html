@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PageLab — simulador de substituição de páginas</title>
+<style>
+:root{
+  --bg:#0f1b2d; --card:#17263d; --card2:#1d3050; --line:#2c4468; --txt:#e8f0fb; --dim:#9db3d1;
+  --ok:#3ddc97; --bad:#ff6b6b; --warn:#ffc857; --acc:#4cc9f0; --fifo:#4cc9f0; --lru:#b794f6; --opt:#3ddc97;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.45 system-ui,Segoe UI,Roboto,Arial,sans-serif}
+header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 18px;align-items:baseline}
+h1{margin:0;font-size:1.35rem;letter-spacing:.3px}
+header small{color:var(--dim)}
+main{max-width:1100px;margin:0 auto;padding:14px 14px 40px}
+nav{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 14px}
+nav button,.btn{background:var(--card);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font:inherit;cursor:pointer}
+nav button[aria-selected=true]{background:var(--acc);color:#06223a;border-color:var(--acc);font-weight:700}
+.btn:hover,nav button:hover{filter:brightness(1.15)}
+.btn.primary{background:var(--acc);color:#06223a;font-weight:700;border-color:var(--acc)}
+.btn:disabled{opacity:.4;cursor:default}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.row{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+label{color:var(--dim);font-size:.9rem}
+input[type=text],input[type=number],select{background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}
+input[type=text]{min-width:260px;flex:1}
+label.wide{display:flex;flex-direction:column;gap:4px;flex:1}
+label.wide input{width:100%}
+input[type=number]{width:84px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{background:var(--card2);color:var(--txt);border:0;padding:9px 14px;font:inherit;cursor:pointer}
+.seg button[aria-pressed=true]{color:#06223a;font-weight:700}
+.seg button[data-alg=fifo][aria-pressed=true]{background:var(--fifo)}
+.seg button[data-alg=lru][aria-pressed=true]{background:var(--lru)}
+.seg button[data-alg=opt][aria-pressed=true]{background:var(--opt)}
+.say{min-height:3.2em;background:var(--card2);border-left:5px solid var(--acc);border-radius:8px;padding:10px 12px;margin-top:10px}
+.say.bad{border-color:var(--bad)} .say.ok{border-color:var(--ok)}
+.scroll{overflow-x:auto}
+table.grid{border-collapse:separate;border-spacing:4px;margin-top:6px}
+table.grid td,table.grid th{min-width:44px;height:42px;text-align:center;border-radius:8px;font-weight:700;font-size:1.05rem}
+table.grid th{background:transparent;color:var(--dim);font-weight:600;text-align:right;padding-right:8px;white-space:nowrap;min-width:90px;font-size:.85rem}
+td.ref{background:var(--card2);color:var(--txt)}
+td.ref.now{outline:3px solid var(--warn)}
+td.slot{background:#0d1626;border:1px solid var(--line);color:var(--txt)}
+td.slot.new{background:#173c5b;border-color:var(--acc);color:#fff}
+td.slot.empty{color:#46607f}
+td.res.f{background:rgba(255,107,107,.18);color:var(--bad)}
+td.res.h{background:rgba(61,220,151,.15);color:var(--ok)}
+td.out{color:var(--warn);font-size:.95rem}
+td.hid{visibility:hidden}
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+.stat{background:var(--card2);border-radius:10px;padding:8px 14px;min-width:120px}
+.stat b{display:block;font-size:1.5rem}
+.stat span{color:var(--dim);font-size:.85rem}
+.f b{color:var(--bad)} .h b{color:var(--ok)}
+.bars .bar{display:flex;align-items:center;gap:10px;margin:8px 0}
+.bars .name{width:70px;font-weight:700}
+.bars .track{flex:1;background:#0d1626;border-radius:8px;height:30px;overflow:hidden}
+.bars .fill{height:100%;display:flex;align-items:center;padding-left:10px;font-weight:700;color:#06223a;transition:width .4s}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0}
+.legend i{display:inline-block;width:18px;height:4px;border-radius:2px;vertical-align:middle;margin-right:6px}
+svg text{fill:var(--dim);font-size:12px}
+.mission{border-left:5px solid var(--line)}
+.mission.done{border-color:var(--ok)}
+.mission h3{margin:0 0 6px}
+.mission .feedback{margin-top:8px;min-height:1.4em}
+.tag{display:inline-block;background:var(--card2);border-radius:999px;padding:2px 10px;font-size:.8rem;color:var(--dim);margin-left:8px}
+.score{font-size:1.1rem;font-weight:700;color:var(--warn)}
+.hint{color:var(--dim);font-size:.9rem}
+@media(max-width:600px){body{font-size:15px}input[type=text]{min-width:0;width:100%}}
+</style>
+</head>
+<body>
+<header>
+  <h1>PageLab · substituição de páginas</h1>
+  <small>Sistemas Operacionais · memória virtual · funciona no celular, sem instalar nada</small>
+</header>
+<main>
+<nav role="tablist" id="tabs">
+  <button role="tab" aria-selected="true" data-tab="sim">1 · Simular passo a passo</button>
+  <button role="tab" aria-selected="false" data-tab="cmp">2 · Comparar as 3 regras</button>
+  <button role="tab" aria-selected="false" data-tab="cost">3 · Quanto custa uma falta?</button>
+  <button role="tab" aria-selected="false" data-tab="mis">4 · Missões</button>
+</nav>
+
+<!-- ============ ABA 1 ============ -->
+<section id="tab-sim">
+  <div class="panel">
+    <div class="row">
+      <label>Sequência pronta
+        <select id="preset"></select>
+      </label>
+      <label>Quadros (frames) na RAM
+        <input type="number" id="nframes" min="1" max="8" value="3">
+      </label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="wide">Páginas acessadas, em ordem (separe por espaço)
+        <input type="text" id="refs" inputmode="numeric" aria-label="Sequência de páginas">
+      </label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <span class="seg" id="algs" role="group" aria-label="Regra de substituição">
+        <button data-alg="fifo" aria-pressed="true">FIFO</button>
+        <button data-alg="lru" aria-pressed="false">LRU</button>
+        <button data-alg="opt" aria-pressed="false">Ótimo</button>
+      </span>
+      <label>Sua previsão de faltas
+        <input type="number" id="guess" min="0" max="99" placeholder="?">
+      </label>
+    </div>
+    <p class="hint" id="algdesc"></p>
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <button class="btn" id="back">◀ Voltar</button>
+      <button class="btn primary" id="next">Próximo passo ▶</button>
+      <button class="btn" id="all">Executar tudo ⏭</button>
+      <button class="btn" id="reset">↺ Reiniciar</button>
+    </div>
+    <div class="scroll"><table class="grid" id="grid" aria-label="Simulação"></table></div>
+    <div class="say" id="say" aria-live="polite">Faça sua previsão acima e clique em “Próximo passo”.</div>
+    <div class="stats">
+      <div class="stat f"><b id="sF">0</b><span>faltas ✗</span></div>
+      <div class="stat h"><b id="sH">0</b><span>acertos ✓</span></div>
+      <div class="stat"><b id="sT">0%</b><span>taxa de falta</span></div>
+      <div class="stat"><b id="sG">—</b><span>sua previsão</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ABA 2 ============ -->
+<section id="tab-cmp" hidden>
+  <div class="panel">
+    <p>Mesma sequência e mesmo número de quadros da aba 1 (<b id="cmpInfo"></b>). Quantas faltas cada regra teve?</p>
+    <div class="bars" id="bars"></div>
+    <p class="hint">O Ótimo é o menor possível, mas precisa conhecer o futuro: serve só como régua de comparação.</p>
+  </div>
+  <div class="panel">
+    <h3 style="margin:0 0 6px">E se aumentarmos a RAM? Faltas × número de quadros</h3>
+    <div class="legend">
+      <span><i style="background:var(--fifo)"></i>FIFO</span>
+      <span><i style="background:var(--lru)"></i>LRU</span>
+      <span><i style="background:var(--opt)"></i>Ótimo</span>
+    </div>
+    <svg id="chart" viewBox="0 0 640 300" width="100%" role="img" aria-label="Gráfico de faltas por número de quadros"></svg>
+    <div class="say" id="beladyNote"></div>
+    <p class="hint">Experimente a sequência “Belady” na aba 1 e volte aqui.</p>
+  </div>
+</section>
+
+<!-- ============ ABA 3 ============ -->
+<section id="tab-cost" hidden>
+  <div class="panel">
+    <p>Um acesso que encontra a página na RAM leva <b>200 ns</b>. Uma falta que vai ao disco leva <b>8 ms</b> (8.000.000 ns). Mova o controle: a cada 1.000 acessos, quantos terminam em falta?</p>
+    <label style="display:block">Faltas a cada 1.000 acessos: <b id="pv">1</b>
+      <input type="range" id="pr" min="0" max="50" step="0.1" value="1" style="width:100%">
+    </label>
+    <div class="stats">
+      <div class="stat"><b id="cT">—</b><span>tempo médio por acesso</span></div>
+      <div class="stat"><b id="cX">—</b><span>vezes mais lento que só RAM</span></div>
+    </div>
+    <div class="say" id="costNote"></div>
+    <p class="hint">Fórmula: tempo médio = (1 − p) × 200 ns + p × 8.000.000 ns, onde p é a fração de acessos que falham.</p>
+  </div>
+</section>
+
+<!-- ============ ABA 4 ============ -->
+<section id="tab-mis" hidden>
+  <div class="panel row" style="justify-content:space-between">
+    <div><b>Missões</b> <span class="hint">— cada uma usa o simulador para descobrir algo. Nível crescente.</span></div>
+    <div class="score">Pontos: <span id="score">0</span> / 100</div>
+  </div>
+  <div id="missions"></div>
+</section>
+</main>
+
+<script>
+/* ==LOGIC-START== */
+const ALG = {fifo:'FIFO', lru:'LRU', opt:'Ótimo'};
+
+/* Simula a substituição de páginas. Devolve {faults, hits, steps}.
+   Cada passo: {ref, slots:[...], fault, placed (índice do quadro alterado), victim (página que saiu ou null), why} */
+function simulate(refs, n, alg){
+  const slots = Array(n).fill(null);
+  const loadedAt = Array(n).fill(-1);     // quando a página entrou (FIFO)
+  const usedAt = Array(n).fill(-1);       // último uso (LRU)
+  const steps = []; let faults = 0;
+  refs.forEach((r, i) => {
+    let idx = slots.indexOf(r), fault = idx < 0, victim = null, why = '';
+    if (!fault){
+      usedAt[idx] = i;
+      why = `A página ${r} já está na RAM: acerto, nada muda.` + (alg==='lru' ? ' No LRU ela passa a ser a mais recente.' : '');
+    } else {
+      faults++;
+      const free = slots.indexOf(null);
+      if (free >= 0){ idx = free; why = `A página ${r} não está na RAM: FALTA. Há quadro livre, ela entra sem expulsar ninguém.`; }
+      else {
+        if (alg === 'fifo'){
+          idx = loadedAt.indexOf(Math.min(...loadedAt));
+          why = `A página ${r} não está na RAM: FALTA. RAM cheia. FIFO expulsa quem chegou primeiro: a página ${slots[idx]}.`;
+        } else if (alg === 'lru'){
+          idx = usedAt.indexOf(Math.min(...usedAt));
+          why = `A página ${r} não está na RAM: FALTA. RAM cheia. LRU expulsa quem ficou mais tempo sem uso: a página ${slots[idx]}.`;
+        } else {
+          let best = -1, bestDist = -1;
+          slots.forEach((p, k) => {
+            let d = refs.indexOf(p, i + 1); d = d < 0 ? Infinity : d;
+            if (d > bestDist || (d === bestDist && loadedAt[k] < loadedAt[best])){ best = k; bestDist = d; }
+          });
+          idx = best;
+          why = `A página ${r} não está na RAM: FALTA. RAM cheia. O Ótimo olha o futuro e expulsa a que será usada mais tarde` +
+                (bestDist === Infinity ? ` (nunca mais): a página ${slots[idx]}.` : `: a página ${slots[idx]}.`);
+        }
+        victim = slots[idx];
+      }
+      slots[idx] = r; loadedAt[idx] = i; usedAt[idx] = i;
+    }
+    steps.push({ref:r, slots:slots.slice(), fault, placed: fault ? idx : -1, victim, why});
+  });
+  return {faults, hits: refs.length - faults, steps};
+}
+const PRESETS = [
+  {nome:'Livro (Silberschatz), 20 acessos', n:3, refs:[7,0,1,2,0,3,0,4,2,3,0,3,2,1,2,0,1,7,0,1]},
+  {nome:'Belady: mais quadros, mais faltas?', n:3, refs:[1,2,3,4,1,2,5,1,2,3,4,5]},
+  {nome:'Boa localidade: laço pequeno', n:3, refs:[1,2,3,1,2,3,1,2,3,1,2,3,1,2,3]},
+  {nome:'Varredura de 4 páginas em 3 quadros', n:3, refs:[1,2,3,4,1,2,3,4,1,2,3,4]},
+];
+function faultsFor(refs, n, alg){ return simulate(refs, n, alg).faults; }
+function parseRefs(t){ return (t.match(/\d+/g) || []).map(Number); }
+/* tempo médio por acesso, em ns, quando uma fração p dos acessos falha */
+function tempoEfetivo(p, tRam=200, tFalha=8_000_000){ return (1 - p) * tRam + p * tFalha; }
+/* Belady: existe n1<n2 em 1..max com mais faltas em n2? devolve [n1,n2,f1,f2] ou null */
+function acharBelady(refs, alg, max=8){
+  for (let a = 1; a <= max; a++) for (let b = a + 1; b <= max; b++){
+    const fa = faultsFor(refs, a, alg), fb = faultsFor(refs, b, alg);
+    if (fb > fa) return [a, b, fa, fb];
+  }
+  return null;
+}
+/* ==LOGIC-END== */
+
+/* ---------- interface ---------- */
+const $ = s => document.querySelector(s);
+const ST = {alg:'fifo', refs:[], n:3, step:0, res:null};
+const DESC = {
+  fifo:'FIFO (First In, First Out): quando falta espaço, sai a página que entrou primeiro, sem olhar se ela ainda é usada.',
+  lru:'LRU (Least Recently Used): sai a página que está há mais tempo sem ser usada; aposta que o passado recente prevê o futuro.',
+  opt:'Ótimo (de Belady): sai a página que só será usada mais tarde. É o melhor possível, mas exige conhecer o futuro.'
+};
+
+function load(){
+  ST.n = Math.max(1, Math.min(8, +$('#nframes').value || 3));
+  ST.refs = parseRefs($('#refs').value).slice(0, 40);
+  ST.res = simulate(ST.refs, ST.n, ST.alg);
+  ST.step = 0;
+  $('#algdesc').textContent = DESC[ST.alg];
+  draw();
+}
+function draw(){
+  const r = ST.res, k = ST.step, g = $('#grid');
+  let h = '<tr><th>Página pedida</th>';
+  r.steps.forEach((s, i) => h += `<td class="ref ${i === k - 1 ? 'now' : ''} ${i >= k ? 'hid' : ''}">${s.ref}</td>`);
+  h += '</tr>';
+  for (let q = 0; q < ST.n; q++){
+    h += `<tr><th>Quadro ${q + 1}</th>`;
+    r.steps.forEach((s, i) => {
+      if (i >= k) return h += '<td class="slot hid">·</td>';
+      const v = s.slots[q];
+      h += `<td class="slot ${v === null ? 'empty' : ''} ${s.placed === q ? 'new' : ''}">${v === null ? '–' : v}</td>`;
+    });
+    h += '</tr>';
+  }
+  h += '<tr><th>Resultado</th>';
+  r.steps.forEach((s, i) => h += i >= k ? '<td class="res hid">·</td>' : `<td class="res ${s.fault ? 'f' : 'h'}">${s.fault ? '✗' : '✓'}</td>`);
+  h += '</tr><tr><th>Saiu da RAM</th>';
+  r.steps.forEach((s, i) => h += `<td class="out ${i >= k ? 'hid' : ''}">${s.victim === null ? '' : s.victim}</td>`);
+  h += '</tr>';
+  g.innerHTML = h;
+
+  const shown = r.steps.slice(0, k), f = shown.filter(s => s.fault).length;
+  $('#sF').textContent = f; $('#sH').textContent = k - f;
+  $('#sT').textContent = k ? Math.round(100 * f / k) + '%' : '0%';
+  const guess = $('#guess').value;
+  const done = k === r.steps.length && k > 0;
+  $('#sG').textContent = guess === '' ? '—' : guess;
+  const say = $('#say'); say.className = 'say';
+  if (!k) say.textContent = 'Faça sua previsão acima e clique em “Próximo passo”.';
+  else if (!done){ say.textContent = r.steps[k - 1].why; say.classList.add(r.steps[k - 1].fault ? 'bad' : 'ok'); }
+  else {
+    let m = `Fim: ${r.faults} faltas e ${r.hits} acertos (${Math.round(100 * r.faults / r.steps.length)}% de faltas).`;
+    if (guess !== '') m += +guess === r.faults ? ' Você acertou a previsão! 🎯' : ` Você previu ${guess}; o resultado foi ${r.faults}. Volte e ache o passo em que a conta divergiu.`;
+    say.textContent = m; say.classList.add('ok');
+  }
+  $('#back').disabled = k === 0; $('#next').disabled = done || !r.steps.length;
+  if (!$('#tab-cmp').hidden) drawCmp();
+}
+function drawCmp(){
+  const refs = ST.refs, n = ST.n;
+  $('#cmpInfo').textContent = `${refs.length} acessos, ${n} quadros`;
+  const vals = {fifo: faultsFor(refs, n, 'fifo'), lru: faultsFor(refs, n, 'lru'), opt: faultsFor(refs, n, 'opt')};
+  const mx = Math.max(1, ...Object.values(vals));
+  $('#bars').innerHTML = Object.keys(vals).map(a =>
+    `<div class="bar"><span class="name">${ALG[a]}</span><div class="track"><div class="fill" style="width:${Math.max(8, 100 * vals[a] / mx)}%;background:var(--${a})">${vals[a]} faltas</div></div></div>`).join('');
+  // gráfico faltas x quadros
+  const N = 8, W = 640, H = 300, L = 44, B = 46, T = 14, R = 14;
+  const series = {fifo: [], lru: [], opt: []};
+  for (let q = 1; q <= N; q++) for (const a in series) series[a].push(faultsFor(refs, q, a));
+  const ym = Math.max(1, ...Object.values(series).flat());
+  const X = q => L + (W - L - R) * (q - 1) / (N - 1), Y = v => H - B - (H - B - T) * v / ym;
+  let s = '';
+  for (let v = 0; v <= ym; v += Math.max(1, Math.ceil(ym / 6))) s += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2c4468"/><text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v}</text>`;
+  for (let q = 1; q <= N; q++) s += `<text x="${X(q)}" y="${H - B + 18}" text-anchor="middle">${q}</text>`;
+  s += `<text x="${(W + L) / 2}" y="${H - 4}" text-anchor="middle">número de quadros</text>`;
+  const col = {fifo:'#4cc9f0', lru:'#b794f6', opt:'#3ddc97'}, dash = {fifo:'', lru:'7 4', opt:'2 4'};
+  for (const a in series){
+    s += `<polyline fill="none" stroke="${col[a]}" stroke-width="3" stroke-dasharray="${dash[a]}" points="${series[a].map((v, i) => X(i + 1) + ',' + Y(v)).join(' ')}"/>`;
+    series[a].forEach((v, i) => s += `<circle cx="${X(i + 1)}" cy="${Y(v)}" r="4" fill="${col[a]}"/>`);
+  }
+  $('#chart').innerHTML = s;
+  const bel = ['fifo', 'lru'].map(a => [a, acharBelady(refs, a, N)]).find(x => x[1]);
+  const note = $('#beladyNote');
+  if (bel){ note.className = 'say bad'; note.textContent = `Anomalia de Belady! Na regra ${ALG[bel[0]]}, com ${bel[1][0]} quadros houve ${bel[1][2]} faltas e com ${bel[1][1]} quadros houve ${bel[1][3]}: mais RAM, mais faltas.`; }
+  else { note.className = 'say ok'; note.textContent = 'Nesta sequência, mais quadros nunca aumentaram as faltas em nenhuma regra. Agora tente a sequência “Belady”.'; }
+}
+function drawCost(){
+  const p = +$('#pr').value / 1000, t = tempoEfetivo(p), x = t / 200;
+  $('#pv').textContent = (+$('#pr').value).toLocaleString('pt-BR');
+  $('#cT').textContent = t >= 1e6 ? (t / 1e6).toFixed(2) + ' ms' : t >= 1e3 ? (t / 1e3).toFixed(1) + ' µs' : t.toFixed(0) + ' ns';
+  $('#cX').textContent = x.toFixed(x >= 10 ? 0 : 1) + '×';
+  $('#costNote').textContent = p === 0 ? 'Sem nenhuma falta, cada acesso leva 200 ns.' :
+    `Uma falta em cada ${Math.round(1 / p).toLocaleString('pt-BR')} acessos já deixa a média ${x.toFixed(0)} vezes pior. O disco é tão mais lento que poucas faltas dominam o tempo.`;
+}
+
+/* ---------- missões ---------- */
+const M = {done:{}, pts:0};
+const MISSOES = [
+  {id:1, pts:15, nivel:'Aquecimento', titulo:'Preveja antes de rodar',
+   txt:'Sequência do livro, 3 quadros, regra FIFO. Sem rodar o simulador, quantas faltas você espera?',
+   campos:[['faltas',0]], check(v){ const c = faultsFor(PRESETS[0].refs, 3, 'fifo'); return v[0] === c ? [true, `Isso! São ${c} faltas.`] : [false, 'Não é esse. Rode a aba 1 e depois refaça a conta do passo em que errou.']; }},
+  {id:2, pts:20, nivel:'Descoberta', titulo:'Quantos quadros bastam?',
+   txt:'Na sequência do livro com LRU, qual é o MENOR número de quadros para ficar com 8 faltas ou menos?',
+   campos:[['quadros',0]], check(v){ let m = null; for (let q = 1; q <= 8; q++) if (faultsFor(PRESETS[0].refs, q, 'lru') <= 8){ m = q; break; } return v[0] === m ? [true, `Correto: ${m} quadros.`] : [false, 'Varie o número de quadros na aba 1 (LRU) ou olhe o gráfico da aba 2.']; }},
+  {id:3, pts:25, nivel:'Descoberta', titulo:'Cace a anomalia de Belady',
+   txt:'Na sequência “Belady” com FIFO, informe dois números de quadros A < B tais que B quadros tenha MAIS faltas que A.',
+   campos:[['A',0],['B',0]], check(v){ const R = PRESETS[1].refs; const [a, b] = v; if (!(a >= 1 && b > a && b <= 8)) return [false, 'Use 1 ≤ A < B ≤ 8.']; const fa = faultsFor(R, a, 'fifo'), fb = faultsFor(R, b, 'fifo'); return fb > fa ? [true, `Achou: ${a} quadros → ${fa} faltas; ${b} quadros → ${fb} faltas. Mais RAM, mais faltas!`] : [false, `Com ${a} quadros: ${fa} faltas; com ${b}: ${fb}. Não houve aumento; olhe o gráfico da aba 2.`]; }},
+  {id:4, pts:40, nivel:'Desafio', titulo:'Construa uma sequência',
+   txt:'Digite 12 páginas (números de 1 a 5, separados por espaço) tais que, com 3 quadros, o Ótimo tenha pelo menos 4 faltas a MENOS que o FIFO.',
+   texto:true, check(_, t){ const R = parseRefs(t); if (R.length !== 12 || R.some(x => x < 1 || x > 5)) return [false, 'Precisa de exatamente 12 números entre 1 e 5.']; const f = faultsFor(R, 3, 'fifo'), o = faultsFor(R, 3, 'opt'); return f - o >= 4 ? [true, `FIFO ${f} faltas, Ótimo ${o}. Diferença de ${f - o}!`] : [false, `FIFO ${f}, Ótimo ${o}: diferença ${f - o}. Dica: faça uma página muito usada ser a mais antiga da fila.`]; }},
+];
+function drawMissions(){
+  $('#missions').innerHTML = MISSOES.map(m => `
+    <div class="panel mission ${M.done[m.id] ? 'done' : ''}" id="m${m.id}">
+      <h3>Missão ${m.id}: ${m.titulo}<span class="tag">${m.nivel} · ${m.pts} pts</span>${M.done[m.id] ? ' ✅' : ''}</h3>
+      <p>${m.txt}</p>
+      <div class="row">${m.texto ? `<input type="text" id="mi${m.id}" placeholder="ex.: 1 2 3 ...">`
+        : m.campos.map((c, i) => `<label>${c[0]} <input type="number" id="mi${m.id}_${i}"></label>`).join('')}
+        <button class="btn primary" data-m="${m.id}">Conferir</button></div>
+      <div class="feedback" id="mf${m.id}" aria-live="polite"></div>
+    </div>`).join('');
+  document.querySelectorAll('[data-m]').forEach(b => b.onclick = () => {
+    const m = MISSOES.find(x => x.id === +b.dataset.m);
+    const v = m.texto ? [] : m.campos.map((_, i) => +$(`#mi${m.id}_${i}`).value);
+    const [ok, msg] = m.check(v, m.texto ? $(`#mi${m.id}`).value : '');
+    const f = $(`#mf${m.id}`); f.textContent = (ok ? '✔ ' : '✘ ') + msg; f.style.color = ok ? 'var(--ok)' : 'var(--bad)';
+    if (ok && !M.done[m.id]){ M.done[m.id] = true; M.pts += m.pts; $('#score').textContent = M.pts; $(`#m${m.id}`).classList.add('done'); }
+  });
+}
+
+/* ---------- eventos ---------- */
+const sel = $('#preset');
+PRESETS.forEach((p, i) => sel.add(new Option(p.nome, i)));
+function usePreset(i){ const p = PRESETS[i]; $('#refs').value = p.refs.join(' '); $('#nframes').value = p.n; $('#guess').value = ''; load(); }
+sel.onchange = () => usePreset(+sel.value);
+['refs', 'nframes'].forEach(id => $('#' + id).addEventListener('input', load));
+$('#guess').addEventListener('input', draw);
+document.querySelectorAll('#algs button').forEach(b => b.onclick = () => {
+  ST.alg = b.dataset.alg;
+  document.querySelectorAll('#algs button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  load();
+});
+$('#next').onclick = () => { if (ST.step < ST.res.steps.length){ ST.step++; draw(); } };
+$('#back').onclick = () => { if (ST.step > 0){ ST.step--; draw(); } };
+$('#all').onclick = () => { ST.step = ST.res.steps.length; draw(); };
+$('#reset').onclick = () => { ST.step = 0; draw(); };
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#tabs button').forEach(x => x.setAttribute('aria-selected', x === b));
+  ['sim', 'cmp', 'cost', 'mis'].forEach(t => $('#tab-' + t).hidden = t !== b.dataset.tab);
+  if (b.dataset.tab === 'cmp') drawCmp(); if (b.dataset.tab === 'cost') drawCost();
+});
+$('#pr').addEventListener('input', drawCost);
+document.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (e.key === 'ArrowRight') $('#next').click(); if (e.key === 'ArrowLeft') $('#back').click(); });
+usePreset(0); drawCost(); drawMissions();
+</script>
+</body>
+</html>
